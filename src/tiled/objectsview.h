@@ -23,8 +23,6 @@
 
 #include <QTreeView>
 
-class QAbstractProxyModel;
-
 namespace Tiled {
 
 class Layer;
@@ -32,6 +30,7 @@ class MapObject;
 
 class MapDocument;
 class MapObjectModel;
+class ReversingProxyModel;
 
 class ObjectsView : public QTreeView
 {
@@ -48,10 +47,9 @@ public:
 
     QModelIndex layerViewIndex(Layer *layer) const;
 
-public slots:
-    void saveExpandedGroups();
-    void restoreExpandedGroups();
-    void clearExpandedGroups(MapDocument *mapDocument);
+    void ensureVisible(MapObject *mapObject);
+
+    void setFilter(const QString &filter);
 
 protected:
     bool event(QEvent *event) override;
@@ -65,7 +63,10 @@ protected:
                  const QStyleOptionViewItem &option,
                  const QModelIndex &index) const override;
 
-private slots:
+private:
+    void saveExpandedLayers();
+    void restoreExpandedLayers();
+
     void onActivated(const QModelIndex &proxyIndex);
     void onSectionResized(int logicalIndex);
     void selectedObjectsChanged();
@@ -74,16 +75,16 @@ private slots:
 
     void showCustomHeaderContextMenu(const QPoint &point);
 
-private:
     void restoreVisibleColumns();
     void synchronizeSelectedItems();
+    void expandToSelectedObjects();
 
     void updateRow(MapObject *object);
 
-    MapDocument *mMapDocument;
-    QAbstractProxyModel *mProxyModel;
-    QMap<MapDocument*, QList<Layer*> > mExpandedGroups;
-    bool mSynching;
+    MapDocument *mMapDocument = nullptr;
+    ReversingProxyModel *mProxyModel;
+    bool mSynching = false;
+    bool mActiveFilter = false;
 };
 
 } // namespace Tiled

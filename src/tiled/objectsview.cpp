@@ -34,20 +34,24 @@
 #include <QKeyEvent>
 #include <QMenu>
 #include <QPainter>
-#include <QSettings>
+#include <QScopedValueRollback>
 
 namespace Tiled {
 
-static const char FIRST_COLUMN_WIDTH_KEY[] = "ObjectsDock/FirstSectionSize";
-static const char VISIBLE_COLUMNS_KEY[] = "ObjectsDock/VisibleSections";
+namespace preferences {
+static Preference<int> firstColumnWidth { "ObjectsDock/FirstSectionSize", 200 };
+static Preference<QVariantList> visibleColumns { "ObjectsDock/VisibleSections", { MapObjectModel::Name, MapObjectModel::Class } };
+} // namespace preferences
 
 ObjectsView::ObjectsView(QWidget *parent)
     : QTreeView(parent)
-    , mMapDocument(nullptr)
     , mProxyModel(new ReversingProxyModel(this))
-    , mSynching(false)
 {
     setMouseTracking(true);
+
+    mProxyModel->setRecursiveFilteringEnabled(true);
+    mProxyModel->setFilterCaseSensitivity(Qt::CaseInsensitive);
+    mProxyModel->setFilterKeyColumn(-1);
 
     setUniformRowHeights(true);
     setModel(mProxyModel);
@@ -76,18 +80,17 @@ void ObjectsView::setMapDocument(MapDocument *mapDoc)
     if (mapDoc == mMapDocument)
         return;
 
-    if (mMapDocument)
+    if (mMapDocument) {
+        saveExpandedLayers();
         mMapDocument->disconnect(this);
+    }
 
     mMapDocument = mapDoc;
 
     if (mMapDocument) {
         mProxyModel->setSourceModel(mMapDocument->mapObjectModel());
 
-        const QSettings *settings = Preferences::instance()->settings();
-        const int firstColumnWidth =
-                settings->value(QLatin1String(FIRST_COLUMN_WIDTH_KEY), 200).toInt();
-        setColumnWidth(0, firstColumnWidth);
+        setColumnWidth(0, preferences::firstColumnWidth);
 
         connect(mMapDocument, &MapDocument::selectedObjectsChanged,
                 this, &ObjectsView::selectedObjectsChanged);
@@ -97,6 +100,11 @@ void ObjectsView::setMapDocument(MapDocument *mapDoc)
 
         restoreVisibleColumns();
         synchronizeSelectedItems();
+
+        if (mActiveFilter)
+            expandAll();
+        else
+            restoreExpandedLayers();
     } else {
         mProxyModel->setSourceModel(nullptr);
     }
@@ -117,31 +125,59 @@ QModelIndex ObjectsView::layerViewIndex(Layer *layer) const
     return QModelIndex();
 }
 
-void ObjectsView::saveExpandedGroups()
+void ObjectsView::ensureVisible(MapObject *mapObject)
 {
-    mExpandedGroups[mMapDocument].clear();
+    scrollTo(mProxyModel->mapFromSource(mapObjectModel()->index(mapObject)));
+}
 
-    for (Layer *layer : mMapDocument->map()->objectGroups()) {
+void ObjectsView::setFilter(const QString &filter)
+{
+    const bool hadActiveFilter = mActiveFilter;
+    const bool activeFilter = !filter.isEmpty();
+
+    if (!hadActiveFilter && activeFilter)
+        saveExpandedLayers();
+
+    mProxyModel->setFilterFixedString(filter);
+    mActiveFilter = activeFilter;
+
+    if (activeFilter) {
+        expandAll();        // Expand to see all results
+    } else if (hadActiveFilter) {
+        collapseAll();
+        restoreExpandedLayers();
+        expandToSelectedObjects();
+    }
+}
+
+void ObjectsView::saveExpandedLayers()
+{
+    if (mActiveFilter)
+        return;
+
+    mMapDocument->expandedObjectLayers.clear();
+
+    for (Layer *layer : mMapDocument->map()->allLayers()) {
+        if (!layer->isObjectGroup() && !layer->isGroupLayer())
+            continue;
+
         const QModelIndex sourceIndex = mMapDocument->mapObjectModel()->index(layer);
         const QModelIndex index = mProxyModel->mapFromSource(sourceIndex);
         if (isExpanded(index))
-            mExpandedGroups[mMapDocument].append(layer);
+            mMapDocument->expandedObjectLayers.insert(layer->id());
     }
 }
 
-void ObjectsView::restoreExpandedGroups()
+void ObjectsView::restoreExpandedLayers()
 {
-    const auto objectGroups = mExpandedGroups.take(mMapDocument);
-    for (Layer *layer : objectGroups) {
-        const QModelIndex sourceIndex = mMapDocument->mapObjectModel()->index(layer);
-        const QModelIndex index = mProxyModel->mapFromSource(sourceIndex);
-        setExpanded(index, true);
+    const auto &layers = mMapDocument->expandedObjectLayers;
+    for (const int layerId : layers) {
+        if (Layer *layer = mMapDocument->map()->findLayerById(layerId)) {
+            const QModelIndex sourceIndex = mMapDocument->mapObjectModel()->index(layer);
+            const QModelIndex index = mProxyModel->mapFromSource(sourceIndex);
+            setExpanded(index, true);
+        }
     }
-}
-
-void ObjectsView::clearExpandedGroups(MapDocument *mapDocument)
-{
-    mExpandedGroups.remove(mapDocument);
 }
 
 bool ObjectsView::event(QEvent *event)
@@ -167,11 +203,11 @@ void ObjectsView::mousePressEvent(QMouseEvent *event)
         mMapDocument->setCurrentObject(mapObject);
 
         if (event->button() == Qt::LeftButton && !event->modifiers())
-            mMapDocument->focusMapObjectRequested(mapObject);
+            emit mMapDocument->focusMapObjectRequested(mapObject);
 
     } else if (Layer *layer = mapObjectModel()->toLayer(index)) {
         mMapDocument->setCurrentObject(layer);
-        mMapDocument->setCurrentLayer(layer);
+        mMapDocument->switchSelectedLayers({ layer });
     }
 
     QTreeView::mousePressEvent(event);
@@ -214,9 +250,7 @@ void ObjectsView::onSectionResized(int logicalIndex)
     if (logicalIndex != 0)
         return;
 
-    QSettings *settings = Preferences::instance()->settings();
-    settings->setValue(QLatin1String(FIRST_COLUMN_WIDTH_KEY),
-                       columnWidth(0));
+    preferences::firstColumnWidth = columnWidth(0);
 }
 
 void ObjectsView::selectionChanged(const QItemSelection &selected,
@@ -238,9 +272,8 @@ void ObjectsView::selectionChanged(const QItemSelection &selected,
     }
 
     if (selectedObjects != mMapDocument->selectedObjects()) {
-        mSynching = true;
+        QScopedValueRollback<bool> synching(mSynching, true);
         mMapDocument->setSelectedObjects(selectedObjects);
-        mSynching = false;
     }
 }
 
@@ -291,13 +324,12 @@ void ObjectsView::setColumnVisibility(bool visible)
     int column = action->data().toInt();
     setColumnHidden(column, !visible);
 
-    QSettings *settings = Preferences::instance()->settings();
     QVariantList visibleColumns;
     for (int i = 0; i < mProxyModel->columnCount(); i++) {
         if (!isColumnHidden(i))
             visibleColumns.append(i);
     }
-    settings->setValue(QLatin1String(VISIBLE_COLUMNS_KEY), visibleColumns);
+    preferences::visibleColumns = visibleColumns;
 }
 
 void ObjectsView::showCustomHeaderContextMenu(const QPoint &point)
@@ -320,9 +352,7 @@ void ObjectsView::showCustomHeaderContextMenu(const QPoint &point)
 
 void ObjectsView::restoreVisibleColumns()
 {
-    QSettings *settings = Preferences::instance()->settings();
-    QVariantList visibleColumns = settings->value(QLatin1String(VISIBLE_COLUMNS_KEY),
-                                                  QVariantList() << MapObjectModel::Name << MapObjectModel::Type).toList();
+    const QVariantList visibleColumns = preferences::visibleColumns;
 
     for (int i = 0; i < mProxyModel->columnCount(); i++)
         setColumnHidden(i, !visibleColumns.contains(i));
@@ -340,12 +370,24 @@ void ObjectsView::synchronizeSelectedItems()
         itemSelection.select(index, index);
     }
 
-    mSynching = true;
+    QScopedValueRollback<bool> synching(mSynching, true);
     selectionModel()->select(itemSelection,
                              QItemSelectionModel::Select |
                              QItemSelectionModel::Rows |
                              QItemSelectionModel::Clear);
-    mSynching = false;
+}
+
+void ObjectsView::expandToSelectedObjects()
+{
+    const QList<MapObject *> &selectedObjects = mMapDocument->selectedObjects();
+    for (auto object : selectedObjects) {
+        auto index = mProxyModel->mapFromSource(mapObjectModel()->index(object));
+
+        // Make sure all parents are expanded
+        for (QModelIndex parent = index.parent(); parent.isValid(); parent = parent.parent())
+            if (!isExpanded(parent))
+                expand(parent);
+    }
 }
 
 void ObjectsView::updateRow(MapObject *object)
@@ -361,3 +403,5 @@ void ObjectsView::updateRow(MapObject *object)
 }
 
 } // namespace Tiled
+
+#include "moc_objectsview.cpp"

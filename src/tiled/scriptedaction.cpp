@@ -34,21 +34,40 @@ ScriptedAction::ScriptedAction(Id id,
     , mId(id)
     , mCallback(callback)
 {
+    static QIcon scriptIcon = [] {
+        QIcon icon(QStringLiteral("://images/32/plugin.png"));
+        icon.addFile(QStringLiteral("://images/22/plugin.png"));
+        icon.addFile(QStringLiteral("://images/16/plugin.png"));
+        return icon;
+    }();
+
+    setIcon(scriptIcon);
+
     connect(this, &QAction::triggered, this, [this] {
         QJSValueList arguments;
         arguments.append(ScriptManager::instance().engine()->newQObject(this));
 
-        mCallback.call(arguments);
+        QJSValue result = mCallback.call(arguments);
+        ScriptManager::instance().checkError(result);
     });
 }
 
-void ScriptedAction::setIconName(const QString &name)
+void ScriptedAction::setIconFileName(const QString &fileName)
 {
-    if (mIconName == name)
+    if (mIconFileName == fileName)
         return;
 
-    mIconName = name;
-    Utils::setThemeIcon(this, name);
+    mIconFileName = fileName;
+
+    QString iconFile = fileName;
+
+    const QString ext = QStringLiteral("ext:");
+    if (!iconFile.startsWith(ext))
+        iconFile.prepend(ext);
+
+    setIcon(QIcon { iconFile });
 }
 
 } // namespace Tiled
+
+#include "moc_scriptedaction.cpp"

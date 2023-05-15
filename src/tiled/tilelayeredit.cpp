@@ -60,12 +60,22 @@ void TileLayerEdit::setTile(int x, int y, EditableTile *tile, int flags)
 
 void TileLayerEdit::apply()
 {
+    // Applying an edit automatically makes it mergeable, so that further
+    // changes made through the same edit are merged by default.
+    bool mergeable = std::exchange(mMergeable, true);
+
     // Determine painted region and normalize the changes layer
     auto paintedRegion = mChanges.region([] (const Cell &cell) { return cell.checked(); });
+
+    // If the painted region is empty there's nothing else to do
+    if (paintedRegion.isEmpty())
+        return;
+
     auto rect = paintedRegion.boundingRect();
     mChanges.resize(rect.size(), -rect.topLeft());
+    const auto tilesets = mChanges.usedTilesets();
 
-    if (mTargetLayer->map()) {
+    if (mTargetLayer->mapDocument()) {
         // Apply the change using an undo command
         auto mapDocument = mTargetLayer->map()->mapDocument();
         auto paint = new PaintTileLayer(mapDocument,
@@ -73,9 +83,9 @@ void TileLayerEdit::apply()
                                         rect.x(), rect.y(),
                                         &mChanges,
                                         paintedRegion);
+        paint->setMergeable(mergeable);
 
         // Add any used tilesets that aren't yet part of the target map
-        const auto tilesets = mChanges.usedTilesets();
         const auto existingTilesets = mapDocument->map()->tilesets();
         for (const SharedTileset &tileset : tilesets)
             if (!existingTilesets.contains(tileset))
@@ -83,6 +93,10 @@ void TileLayerEdit::apply()
 
         mTargetLayer->map()->push(paint);
     } else {
+        // Add any used tilesets that aren't yet part of the target map
+        if (auto map = mTargetLayer->tileLayer()->map())
+            map->addTilesets(tilesets);
+
         // Apply the change directly
         mTargetLayer->tileLayer()->setCells(rect.x(), rect.y(), &mChanges, paintedRegion);
     }
@@ -91,3 +105,5 @@ void TileLayerEdit::apply()
 }
 
 } // namespace Tiled
+
+#include "moc_tilelayeredit.cpp"

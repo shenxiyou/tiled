@@ -28,8 +28,9 @@
 #include "tilelayer.h"
 #include "compression.h"
 
-#include <QtEndian>
+#include <QCoreApplication>
 #include <QFile>
+#include <QtEndian>
 
 using namespace ReplicaIsland;
 
@@ -70,8 +71,11 @@ std::unique_ptr<Tiled::Map> ReplicaIslandPlugin::read(const QString &fileName)
         return nullptr;
     }
 
-    // Create our map, setting width and height to 0 until we load a layer.
-    std::unique_ptr<Map> map { new Map(Map::Orthogonal, 0, 0, 32, 32) };
+    // Create our map, leaving width and height to 0 until we load a layer.
+    Map::Parameters mapParameters;
+    mapParameters.tileWidth = 32;
+    mapParameters.tileHeight = 32;
+    auto map = std::make_unique<Map>(mapParameters);
     map->setProperty("background_index", QString::number(backgroundIndex));
 
     // Load our Tilesets.
@@ -205,7 +209,7 @@ QString ReplicaIslandPlugin::nameFilter() const
 
 QString ReplicaIslandPlugin::shortName() const
 {
-    return QLatin1String("replicaisland");
+    return QStringLiteral("replicaisland");
 }
 
 bool ReplicaIslandPlugin::supportsFile(const QString &fileName) const
@@ -229,15 +233,16 @@ QString ReplicaIslandPlugin::errorString() const
     return mError;
 }
 
-// Writer
-bool ReplicaIslandPlugin::write(const Tiled::Map *map, const QString &fileName)
+bool ReplicaIslandPlugin::write(const Tiled::Map *map, const QString &fileName, Options options)
 {
+    Q_UNUSED(options)
+
     using namespace Tiled;
 
     // Open up a temporary file for saving the level.
     SaveFile file(fileName);
     if (!file.open(QIODevice::WriteOnly)) {
-        mError = tr("Could not open file for writing.");
+        mError = QCoreApplication::translate("File Errors", "Could not open file for writing.");
         return false;
     }
 
@@ -275,7 +280,6 @@ bool ReplicaIslandPlugin::write(const Tiled::Map *map, const QString &fileName)
     return true;
 }
 
-// Write out a map layer.
 bool ReplicaIslandPlugin::writeLayer(QDataStream &out, Tiled::TileLayer *layer)
 {
     using namespace Tiled;

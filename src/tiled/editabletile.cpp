@@ -21,8 +21,19 @@
 #include "editabletile.h"
 
 #include "changetile.h"
-#include "changetileprobability.h"
+#include "changetileanimation.h"
+#include "changetileimagesource.h"
+#include "changetileobjectgroup.h"
+#include "editablemanager.h"
+#include "editableobjectgroup.h"
 #include "editabletileset.h"
+#include "imagecache.h"
+#include "objectgroup.h"
+#include "scriptimage.h"
+#include "scriptmanager.h"
+
+#include <QCoreApplication>
+#include <QJSEngine>
 
 namespace Tiled {
 
@@ -33,8 +44,35 @@ EditableTile::EditableTile(EditableTileset *tileset, Tile *tile, QObject *parent
 
 EditableTile::~EditableTile()
 {
-    if (tileset())
-        tileset()->mEditableTiles.remove(tile());
+    EditableManager::instance().remove(this);
+}
+
+EditableObjectGroup *EditableTile::objectGroup() const
+{
+    if (!mAttachedObjectGroup) {
+        mAttachedObjectGroup = tile()->objectGroup();
+    } else {
+        Q_ASSERT(mAttachedObjectGroup == tile()->objectGroup());
+    }
+
+    return EditableManager::instance().editableObjectGroup(asset(), mAttachedObjectGroup);
+}
+
+QJSValue EditableTile::frames() const
+{
+    QJSEngine *engine = ScriptManager::instance().engine();
+
+    const auto &frames = tile()->frames();
+    QJSValue array = engine->newArray(frames.size());
+
+    for (int i = 0; i < frames.size(); ++i) {
+        QJSValue frameObject = engine->newObject();
+        frameObject.setProperty(QStringLiteral("tileId"), frames.at(i).tileId);
+        frameObject.setProperty(QStringLiteral("duration"), frames.at(i).duration);
+        array.setProperty(i, frameObject);
+    }
+
+    return array;
 }
 
 EditableTileset *EditableTile::tileset() const
@@ -42,42 +80,165 @@ EditableTileset *EditableTile::tileset() const
     return static_cast<EditableTileset*>(asset());
 }
 
+void EditableTile::setImage(ScriptImage *image)
+{
+    if (!image) {
+        ScriptManager::instance().throwNullArgError(0);
+        return;
+    }
+
+    // WARNING: This function has no undo!
+    tile()->setImage(QPixmap::fromImage(image->image()));
+}
+
 void EditableTile::detach()
 {
     Q_ASSERT(tileset());
-    Q_ASSERT(tileset()->mEditableTiles.contains(tile()));
 
-    tileset()->mEditableTiles.remove(tile());
+    auto &editableManager = EditableManager::instance();
+
+    editableManager.remove(this);
     setAsset(nullptr);
 
     mDetachedTile.reset(tile()->clone(nullptr));
     setObject(mDetachedTile.get());
+    editableManager.mEditables.insert(tile(), this);
+
+    // Move over any attached editable object group
+    if (auto editable = editableManager.find(mAttachedObjectGroup)) {
+        editableManager.remove(editable);
+        editable->setAsset(nullptr);
+        editable->setObject(tile()->objectGroup());
+        editableManager.mEditables.insert(tile()->objectGroup(), editable);
+        mAttachedObjectGroup = tile()->objectGroup();
+    } else {
+        mAttachedObjectGroup = nullptr;
+    }
 }
 
 void EditableTile::attach(EditableTileset *tileset)
 {
     Q_ASSERT(!asset() && tileset);
-    Q_ASSERT(!tileset->mEditableTiles.contains(tile()));
 
     setAsset(tileset);
-    tileset->mEditableTiles.insert(tile(), this);
     mDetachedTile.release();
 }
 
-void EditableTile::setType(const QString &type)
+void EditableTile::detachObjectGroup()
 {
-    if (asset())
-        asset()->push(new ChangeTileType(tileset()->tilesetDocument(), { tile() }, type));
-    else
-        tile()->setType(type);
+    if (auto editable = EditableManager::instance().find(mAttachedObjectGroup))
+        editable->detach();
+    mAttachedObjectGroup = nullptr;
+}
+
+void EditableTile::setImageFileName(const QString &fileName)
+{
+    if (TilesetDocument *doc = tilesetDocument()) {
+        if (!tileset()->tileset()->isCollection()) {
+            ScriptManager::instance().throwError(QCoreApplication::translate("Script Errors", "Tileset needs to be an image collection"));
+            return;
+        }
+
+        asset()->push(new ChangeTileImageSource(doc, tile(),
+                                                QUrl::fromLocalFile(fileName)));
+    } else if (!checkReadOnly()) {
+        tile()->setImage(ImageCache::loadPixmap(fileName));
+        tile()->setImageSource(QUrl::fromLocalFile(fileName));
+    }
+}
+
+void EditableTile::setImageRect(const QRect &rect)
+{
+    if (TilesetDocument *doc = tilesetDocument()) {
+        if (!tileset()->tileset()->isCollection()) {
+            ScriptManager::instance().throwError(QCoreApplication::translate("Script Errors", "Tileset needs to be an image collection"));
+            return;
+        }
+
+        asset()->push(new ChangeTileImageRect(doc, { tile() }, { rect }));
+    } else if (!checkReadOnly()) {
+        tile()->setImageRect(rect);
+    }
 }
 
 void EditableTile::setProbability(qreal probability)
 {
-    if (asset())
-        asset()->push(new ChangeTileProbability(tileset()->tilesetDocument(), { tile() }, probability));
-    else
+    if (TilesetDocument *doc = tilesetDocument())
+        asset()->push(new ChangeTileProbability(doc, { tile() }, probability));
+    else if (!checkReadOnly())
         tile()->setProbability(probability);
 }
 
+void EditableTile::setObjectGroup(EditableObjectGroup *editableObjectGroup)
+{
+    if (checkReadOnly())
+        return;
+
+    std::unique_ptr<ObjectGroup> og;
+
+    if (editableObjectGroup) {
+        if (!editableObjectGroup->isOwning()) {
+            ScriptManager::instance().throwError(QCoreApplication::translate("Script Errors", "ObjectGroup is in use"));
+            return;
+        }
+
+        og.reset(static_cast<ObjectGroup*>(editableObjectGroup->release()));
+    }
+
+    if (TilesetDocument *doc = tilesetDocument()) {
+        asset()->push(new ChangeTileObjectGroup(doc, tile(), std::move(og)));
+    } else {
+        detachObjectGroup();
+        tile()->setObjectGroup(std::move(og));
+    }
+
+    if (editableObjectGroup) {
+        Q_ASSERT(editableObjectGroup->objectGroup() == tile()->objectGroup());
+        Q_ASSERT(!editableObjectGroup->isOwning());
+    } else {
+        Q_ASSERT(tile()->objectGroup() == nullptr);
+    }
+}
+
+void EditableTile::setFrames(QJSValue value)
+{
+    if (!value.isArray()) {
+        ScriptManager::instance().throwError(QCoreApplication::translate("Script Errors", "Array expected"));
+        return;
+    }
+
+    if (checkReadOnly())
+        return;
+
+    QVector<Frame> frames;
+    const int length = value.property(QStringLiteral("length")).toInt();
+
+    for (int i = 0; i < length; ++i) {
+        const auto frameValue = value.property(i);
+        const Frame frame {
+            frameValue.property(QStringLiteral("tileId")).toInt(),
+            frameValue.property(QStringLiteral("duration")).toInt()
+        };
+
+        if (frame.tileId < 0 || frame.duration < 0) {
+            ScriptManager::instance().throwError(QCoreApplication::translate("Script Errors", "Invalid value (negative)"));
+            return;
+        }
+
+        frames.append(frame);
+    }
+
+    if (TilesetDocument *doc = tilesetDocument())
+        asset()->push(new ChangeTileAnimation(doc, tile(), frames));
+    else
+        tile()->setFrames(frames);
+}
+
+TilesetDocument *EditableTile::tilesetDocument() const
+{
+    return tileset() ? tileset()->tilesetDocument() : nullptr;
+}
+
 } // namespace Tiled
+
+#include "moc_editabletile.cpp"

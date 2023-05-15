@@ -72,7 +72,7 @@ Id::Id(const char *name)
 
     StringHash sh(temp);
 
-    int id = idFromString.value(sh, 0);
+    uint id = idFromString.value(sh, 0);
 
     if (id == 0) {
         id = firstUnusedId++;
@@ -92,6 +92,34 @@ Id::Id(const QByteArray &name)
 QByteArray Id::name() const
 {
     return stringFromId.value(mId).string;
+}
+
+QString Id::toString() const
+{
+    return QString::fromUtf8(name());
+}
+
+
+QStringList idsToNames(const QList<Id> &ids)
+{
+    QStringList names;
+    names.reserve(ids.size());
+    for (const Id &id : ids)
+        names.append(id.toString());
+
+    names.sort();
+
+    return names;
+}
+
+QList<Id> namesToIds(const QStringList &names)
+{
+    QList<Id> ids;
+    ids.reserve(names.size());
+    for (const QString &name : names)
+        ids.append(Id(name.toUtf8()));
+
+    return ids;
 }
 
 } // namespace Tiled

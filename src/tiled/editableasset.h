@@ -22,6 +22,9 @@
 
 #include "editableobject.h"
 
+#include <QJSValue>
+#include <QSharedPointer>
+
 #include <memory>
 
 class QUndoCommand;
@@ -41,21 +44,26 @@ class EditableAsset : public EditableObject
     Q_PROPERTY(bool isTileset READ isTileset CONSTANT)
 
 public:
-    explicit EditableAsset(Document *document, Object *object, QObject *parent = nullptr);
+    EditableAsset(Document *document, Object *object, QObject *parent = nullptr);
 
     QString fileName() const;
-    virtual bool isReadOnly() const = 0;
+    bool isReadOnly() const override = 0;
     bool isMap() const;
     bool isTileset() const;
 
     QUndoStack *undoStack() const;
     bool isModified() const;
     bool push(QUndoCommand *command);
-    bool push(std::unique_ptr<QUndoCommand> &&command);
+    bool push(std::unique_ptr<QUndoCommand> command);
 
-    bool checkReadOnly() const;
+    Q_INVOKABLE QJSValue macro(const QString &text, QJSValue callback);
 
     Document *document() const;
+
+    /**
+     * Creates a document for this asset.
+     */
+    virtual QSharedPointer<Document> createDocument() = 0;
 
 public slots:
     void undo();
@@ -66,19 +74,21 @@ signals:
     void fileNameChanged(const QString &fileName, const QString &oldFileName);
 
 private:
-    Document * const mDocument;
-    QUndoStack * const mUndoStack;
+    friend class Document;
+    void setDocument(Document *document);
+
+    Document *mDocument;
 };
 
-
-inline QUndoStack *EditableAsset::undoStack() const
-{
-    return mUndoStack;
-}
 
 inline Document *EditableAsset::document() const
 {
     return mDocument;
+}
+
+inline void EditableAsset::setDocument(Document *document)
+{
+    mDocument = document;
 }
 
 } // namespace Tiled

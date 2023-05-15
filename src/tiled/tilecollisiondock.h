@@ -34,6 +34,7 @@ class Tile;
 class Tileset;
 
 class AbstractTool;
+class EditableMapObject;
 class MapScene;
 class MapView;
 class ObjectsView;
@@ -43,6 +44,9 @@ class ToolManager;
 class TileCollisionDock : public QDockWidget
 {
     Q_OBJECT
+
+    Q_PROPERTY(QList<QObject*> selectedObjects READ selectedObjectsForScript WRITE setSelectedObjectsFromScript)
+    Q_PROPERTY(Tiled::MapView *view READ mapView CONSTANT)
 
 public:
     enum Operation {
@@ -66,10 +70,16 @@ public:
     void setTilesetDocument(TilesetDocument *tilesetDocument);
 
     MapDocument *dummyMapDocument() const;
+    MapView *mapView() const;
 
     ToolManager *toolManager() const;
 
     bool hasSelectedObjects() const;
+
+    QList<QObject*> selectedObjectsForScript() const;
+    void setSelectedObjectsFromScript(const QList<QObject*> &selectedObjects);
+
+    Q_INVOKABLE void focusObject(Tiled::EditableMapObject *object);
 
 signals:
     void dummyMapDocumentChanged(MapDocument *mapDocument);
@@ -85,15 +95,17 @@ public slots:
     void pasteInPlace();
     void paste(ClipboardManager::PasteFlags flags);
     void delete_(Operation operation = Delete);
+    void autoDetectMask();
 
 protected:
     void changeEvent(QEvent *e) override;
 
-private slots:
-    void setSelectedTool(AbstractTool*);
+private:
     void applyChanges();
+    void documentChanged(const ChangeEvent &change);
     void tileObjectGroupChanged(Tile*);
     void tilesetTileOffsetChanged(Tileset *tileset);
+    void tilesetChanged(Tileset *tileset);
 
     void selectedObjectsChanged();
     void setHasSelectedObjects(bool hasSelectedObjects);
@@ -108,7 +120,8 @@ private slots:
 
     void setObjectsViewVisibility(ObjectsViewVisibility);
 
-private:
+    MapObject *clonedObjectForScriptObject(EditableMapObject *scriptObject);
+
     void retranslateUi();
 
     Tile *mTile = nullptr;
@@ -123,6 +136,7 @@ private:
     QAction *mObjectsViewShowRightAction;
     QAction *mObjectsViewShowBottomAction;
     ToolManager *mToolManager;
+    QAction *mActionAutoDetectMask;
     QAction *mActionDuplicateObjects;
     QAction *mActionRemoveObjects;
     QAction *mActionMoveUp;
@@ -139,6 +153,11 @@ inline MapDocument *TileCollisionDock::dummyMapDocument() const
     return mDummyMapDocument.data();
 }
 
+inline MapView *TileCollisionDock::mapView() const
+{
+    return mMapView;
+}
+
 inline ToolManager *TileCollisionDock::toolManager() const
 {
     return mToolManager;
@@ -150,3 +169,5 @@ inline bool TileCollisionDock::hasSelectedObjects() const
 }
 
 } // namespace Tiled
+
+Q_DECLARE_METATYPE(Tiled::TileCollisionDock*)

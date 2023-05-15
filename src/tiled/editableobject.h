@@ -26,14 +26,24 @@
 
 namespace Tiled {
 
+class Document;
 class EditableAsset;
 
+/**
+ * Editable wrapper class, enabling objects to be inspected and modified from
+ * scripts.
+ *
+ * Generally, editables are created on-demand and are owned by the script
+ * (garbage collected). This excludes EditableAsset instances, which are owned
+ * by their Document.
+ */
 class EditableObject : public QObject
 {
     Q_OBJECT
 
     Q_PROPERTY(Tiled::EditableAsset *asset READ asset)
     Q_PROPERTY(bool readOnly READ isReadOnly)
+    Q_PROPERTY(QString className READ className WRITE setClassName)
 
 public:
     EditableObject(EditableAsset *asset,
@@ -41,23 +51,41 @@ public:
                    QObject *parent = nullptr);
 
     EditableAsset *asset() const;
+
     virtual bool isReadOnly() const;
+    bool checkReadOnly() const;
+
+    const QString &className() const;
 
     Q_INVOKABLE QVariant property(const QString &name) const;
     Q_INVOKABLE void setProperty(const QString &name, const QVariant &value);
+    Q_INVOKABLE void setColorProperty(const QString &name, const QColor &value);
+    Q_INVOKABLE void setColorProperty(const QString &name, int r, int g, int b, int a = 255);
+    Q_INVOKABLE void setFloatProperty(const QString &name, qreal value);
 
     Q_INVOKABLE QVariantMap properties() const;
     Q_INVOKABLE void setProperties(const QVariantMap &properties);
 
     Q_INVOKABLE void removeProperty(const QString &name);
 
-    Object *object() const;
+    Q_INVOKABLE QVariant resolvedProperty(const QString &name) const;
+    Q_INVOKABLE QVariantMap resolvedProperties() const;
 
-protected:
+    Object *object() const;
+    Document *document() const;
+
     void setAsset(EditableAsset *asset);
     void setObject(Object *object);
 
+public slots:
+    void setClassName(const QString &type);
+
 private:
+    QVariant toScript(const QVariant &value) const;
+    QVariant fromScript(const QVariant &value) const;
+    QVariantMap toScript(const QVariantMap &value) const;
+    QVariantMap fromScript(const QVariantMap &value) const;
+
     EditableAsset *mAsset;
     Object *mObject;
 };
@@ -68,14 +96,44 @@ inline EditableAsset *EditableObject::asset() const
     return mAsset;
 }
 
+inline const QString &EditableObject::className() const
+{
+    return object()->className();
+}
+
 inline QVariant EditableObject::property(const QString &name) const
 {
-    return mObject->property(name);
+    return toScript(mObject->property(name));
+}
+
+inline void EditableObject::setColorProperty(const QString &name, const QColor &value)
+{
+    setProperty(name, value);
+}
+
+inline void EditableObject::setColorProperty(const QString &name, int r, int g, int b, int a)
+{
+    setProperty(name, QColor(r, g, b, a));
+}
+
+inline void EditableObject::setFloatProperty(const QString &name, qreal value)
+{
+    setProperty(name, value);
 }
 
 inline QVariantMap EditableObject::properties() const
 {
-    return mObject->properties();
+    return toScript(mObject->properties());
+}
+
+inline QVariant EditableObject::resolvedProperty(const QString &name) const
+{
+    return toScript(mObject->resolvedProperty(name));
+}
+
+inline QVariantMap EditableObject::resolvedProperties() const
+{
+    return toScript(mObject->resolvedProperties());
 }
 
 inline Object *EditableObject::object() const
