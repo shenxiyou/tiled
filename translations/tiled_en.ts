@@ -1187,6 +1187,12 @@ Line %1, column %2</source>
         <translation></translation>
     </message>
     <message>
+        <location line="+5"/>
+        <source>TexturePacker Images</source>
+        <translation></translation>
+    </message>
+
+    <message>
         <location line="-19"/>
         <source>Type:</source>
         <translation></translation>

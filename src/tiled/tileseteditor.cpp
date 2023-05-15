@@ -635,8 +635,7 @@ void TilesetEditor::openAddTilesDialog()
     const auto urls = QFileDialog::getOpenFileUrls(mMainWindow->window(),
                                                    tr("Add Tiles"),
                                                    QUrl::fromLocalFile(startLocation),
-                                                   filter);
-
+                                                   filter);    
     if (!urls.isEmpty())
         addTiles(urls);
 }

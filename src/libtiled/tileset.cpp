@@ -88,7 +88,13 @@ TilesetFormat *Tileset::format() const
 {
     return mFormat;
 }
-
+void Tileset::setType(int t) {
+    mType = t;
+}
+int Tileset::type() const
+{
+    return mType;
+}
 /**
  * Sets the tile size of this tileset. Affects how image is cut in loadImage.
  *

@@ -1197,6 +1197,11 @@ Line %1, column %2</source>
         <translation>图像集合</translation>
     </message>
     <message>
+        <location line="+5"/>
+        <source>TexturePacker Images</source>
+        <translation>TexturePacker图集</translation>
+    </message>
+    <message>
         <location line="-19"/>
         <source>Type:</source>
         <translation>类型:</translation>

@@ -321,6 +321,8 @@ void MapWriterPrivate::writeTileset(QXmlStreamWriter &w, const Tileset &tileset,
     }
 
     w.writeAttribute(QLatin1String("name"), tileset.name());
+    w.writeAttribute(QLatin1String("type"),
+                     QString::number(tileset.type()));
     w.writeAttribute(QLatin1String("tilewidth"),
                      QString::number(tileset.tileWidth()));
     w.writeAttribute(QLatin1String("tileheight"),

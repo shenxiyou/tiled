@@ -46,7 +46,8 @@ using namespace Tiled;
 
 enum TilesetType {
     TilesetImage,
-    ImageCollection
+    ImageCollection,
+    TextrePackerImage
 };
 
 static TilesetType tilesetType(Ui::NewTilesetDialog *ui)
@@ -57,6 +58,8 @@ static TilesetType tilesetType(Ui::NewTilesetDialog *ui)
         return TilesetImage;
     case 1:
         return ImageCollection;
+    case 2:
+        return TextrePackerImage;
     }
 }
 
@@ -201,8 +204,8 @@ void NewTilesetDialog::tryAccept()
     const QString name = mUi->name->text();
 
     SharedTileset tileset;
-
-    if (tilesetType(mUi) == TilesetImage) {
+    TilesetType type = tilesetType(mUi);
+    if (type == TilesetImage) {
         const QString image = mUi->image->text();
         const bool useTransparentColor = mUi->useTransparentColor->isChecked();
         const QColor transparentColor = mUi->colorButton->color();
@@ -252,7 +255,7 @@ void NewTilesetDialog::tryAccept()
         s->setValue(QLatin1String(TYPE_KEY), mUi->tilesetType->currentIndex());
         s->setValue(QLatin1String(EMBED_KEY), mUi->embedded->isChecked());
     }
-
+    tileset->setType(type);
     mNewTileset = tileset;
     accept();
 }

@@ -114,7 +114,8 @@ public:
 
     void setFormat(TilesetFormat *format);
     TilesetFormat *format() const;
-
+    int type() const;
+    void setType(int t);
     int tileWidth() const;
     int tileHeight() const;
 
@@ -248,6 +249,7 @@ private:
     QString mName;
     QString mFileName;
     ImageReference mImageReference;
+    int mType;
     int mTileWidth;
     int mTileHeight;
     int mTileSpacing;
